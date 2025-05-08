@@ -67,6 +67,8 @@ def xformers_forward(
 
     past_key_value = (key_states, value_states) if use_cache else None
 
+    # TODO (Mercury) : This is most likely the injection spot for the attention matrix
+
     # We only apply xformers optimizations if we don't need to output the whole attention matrix
     if not output_attentions:
         query_states = query_states.transpose(1, 2)
