@@ -92,7 +92,6 @@ def divide_to_patches(image, patch_size):
             box = (j, i, j + patch_size, i + patch_size)
             patch = image.crop(box)
             patches.append(patch)
-
     return patches
 
 
