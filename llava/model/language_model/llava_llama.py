@@ -147,7 +147,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
         attention_mask = torch.ones((inputs_embeds.shape[0], inputs_embeds.shape[1]), dtype=torch.bool)
-        mask_degree = 0.3
+        mask_degree = 0.5
         if image_infos is not None :
             for i in range(len(images)) :
                 image_info = image_infos[i]
@@ -162,7 +162,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
                 # re-shape to square
                 curr_mask = attention_mask[i][start_idx : end_idx + 1].view((side_len, side_len)) 
-                print("Prior:",attention_mask)
 
                 mask_len = int(side_len // 2 * mask_degree)
 
@@ -171,12 +170,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 curr_mask[-mask_len:, :] = 0
                 curr_mask[:, :mask_len] = 0
                 curr_mask[:, -mask_len:] = 0
-                print('After:',attention_mask)
-
 
                 attention_mask[i][start_idx : end_idx + 1] = curr_mask.view(-1)
-
-                # visualize_attention(attention=attention_mask[i][start_idx : end_idx + 1])
 
         return super().generate(
             position_ids=position_ids,
