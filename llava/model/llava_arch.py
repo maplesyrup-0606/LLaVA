@@ -149,7 +149,7 @@ class LlavaMetaForCausalLM(ABC):
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
@@ -208,8 +208,6 @@ class LlavaMetaForCausalLM(ABC):
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
             raise NotImplementedError
 
-        # TODO: Attention mask change should happen here
-
         # Let's just add dummy tensors if they do not exist,
         # it is a headache to deal with None all the time.
         # But it is not ideal, and if you have a better idea,``
@@ -240,6 +238,7 @@ class LlavaMetaForCausalLM(ABC):
         input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
         labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
 
+        images_infos = []
         new_input_embeds = []
         new_labels = []
         cur_image_idx = 0
@@ -265,6 +264,16 @@ class LlavaMetaForCausalLM(ABC):
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
             cur_labels_noim = []
+
+            image_start_index = image_token_indices[1]
+            num_patches = image_features[cur_image_idx].shape[0]
+            
+            image_info = {
+                "start_index" : image_start_index,
+                "num_patches" : num_patches
+            }
+
+            images_infos.append(image_info)
 
             # finds input_ids / labels where there are no images
             for i in range(len(image_token_indices) - 1):
@@ -351,7 +360,7 @@ class LlavaMetaForCausalLM(ABC):
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, images_infos
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:

@@ -2,6 +2,7 @@ import datetime
 import logging
 import logging.handlers
 import os
+import matplotlib.pyplot as plt
 import sys
 
 import requests
@@ -124,3 +125,31 @@ def pretty_print_semaphore(semaphore):
     if semaphore is None:
         return "None"
     return f"Semaphore(value={semaphore._value}, locked={semaphore.locked()})"
+
+def visualize_attention(attention) :
+    attn = attention
+    side_len = 24
+    attn = attn.view(side_len, side_len)
+    attn_weights = attn.cpu().detach().numpy()
+
+    os.makedirs("attention_plots", exist_ok=True)
+
+    # plt.figure(figsize=(10, 4))
+    # plt.plot(attn_weights)
+    # plt.title("Layer 0, Head 0 Attention (Generation Step 1)")
+    # plt.xlabel("Context Token Index")
+    # plt.ylabel("Attention Weight")
+    # plt.savefig(f"mask_plots/attention_mask_image_{i}.png")
+    # plt.tight_layout()
+    # plt.close()
+
+    plt.figure(figsize=(5, 5))
+    plt.imshow(attn.cpu(), cmap='gray', vmin=0, vmax=1)
+    plt.title(f"Attention Mask Patch Grid (Image 0)")
+    plt.axis("off")
+    plt.tight_layout()
+
+    # Save to file
+    plt.savefig("attention_plots/layer0_head0_step1.png")
+    plt.close()
+    return

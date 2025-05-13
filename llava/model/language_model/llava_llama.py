@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+import math
 
 from transformers import AutoConfig, AutoModelForCausalLM, \
                          LlamaConfig, LlamaModel, LlamaForCausalLM
@@ -26,6 +27,7 @@ from transformers.generation.utils import GenerateOutput
 
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
+from llava.utils import visualize_attention
 
 class LlavaConfig(LlamaConfig):
     model_type = "llava_llama"
@@ -77,7 +79,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 past_key_values,
                 inputs_embeds,
-                labels
+                labels,
+                _
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -88,7 +91,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 image_sizes
             )
 
-        return super().forward(
+        result = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -100,6 +103,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
         )
+
+        # attention = result['attentions']
+        # visualize_attention(attention=attention)
+
+        return result
 
     @torch.no_grad()
     def generate(
@@ -114,6 +122,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
 
+        # NOTE: Modifications to see attention masking
+
         if images is not None:
             (
                 inputs,
@@ -121,7 +131,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 _,
                 inputs_embeds,
-                _
+                _,
+                image_infos
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
                 position_ids,
@@ -131,8 +142,41 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes=image_sizes
             )
+
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
+
+        attention_mask = torch.ones((inputs_embeds.shape[0], inputs_embeds.shape[1]), dtype=torch.bool)
+        mask_degree = 0.3
+        if image_infos is not None :
+            for i in range(len(images)) :
+                image_info = image_infos[i]
+                image_start = image_info['start_index']
+                num_patches = image_info['num_patches']
+                
+                # start and end indices of image tokens
+                start_idx = image_start 
+                end_idx = start_idx + num_patches - 1
+
+                side_len = int(math.sqrt(num_patches))
+
+                # re-shape to square
+                curr_mask = attention_mask[i][start_idx : end_idx + 1].view((side_len, side_len)) 
+                print("Prior:",attention_mask)
+
+                mask_len = int(side_len // 2 * mask_degree)
+
+
+                curr_mask[:mask_len, :] = 0
+                curr_mask[-mask_len:, :] = 0
+                curr_mask[:, :mask_len] = 0
+                curr_mask[:, -mask_len:] = 0
+                print('After:',attention_mask)
+
+
+                attention_mask[i][start_idx : end_idx + 1] = curr_mask.view(-1)
+
+                # visualize_attention(attention=attention_mask[i][start_idx : end_idx + 1])
 
         return super().generate(
             position_ids=position_ids,
