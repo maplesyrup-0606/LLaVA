@@ -69,6 +69,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         output_hidden_states: Optional[bool] = None,
         images: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[List[List[int]]] = None,
+        image_infos: Optional[List[dict]] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
@@ -103,9 +104,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
         )
-
-        # attention = result['attentions']
-        # visualize_attention(attention=attention)
 
         return result
 
@@ -146,37 +144,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
-        attention_mask = torch.ones((inputs_embeds.shape[0], inputs_embeds.shape[1]), dtype=torch.bool)
-        mask_degree = 0.3
-        if image_infos is not None :
-            for i in range(len(images)) :
-                image_info = image_infos[i]
-                image_start = image_info['start_index']
-                num_patches = image_info['num_patches']
-                
-                # start and end indices of image tokens
-                start_idx = image_start 
-                end_idx = start_idx + num_patches - 1
-
-                side_len = int(math.sqrt(num_patches))
-
-                # re-shape to square
-                curr_mask = attention_mask[i][start_idx : end_idx + 1].view((side_len, side_len)) 
-                print("Prior:",attention_mask)
-
-                mask_len = int(side_len // 2 * mask_degree)
-
-
-                curr_mask[:mask_len, :] = 0
-                curr_mask[-mask_len:, :] = 0
-                curr_mask[:, :mask_len] = 0
-                curr_mask[:, -mask_len:] = 0
-                print('After:',attention_mask)
-
-
-                attention_mask[i][start_idx : end_idx + 1] = curr_mask.view(-1)
-
-                # visualize_attention(attention=attention_mask[i][start_idx : end_idx + 1])
+        kwargs["image_infos"] = image_infos
+        print(kwargs)
 
         return super().generate(
             position_ids=position_ids,
@@ -189,6 +158,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                                       inputs_embeds=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
+        image_infos = kwargs.pop("image_infos", None)
+
         inputs = super().prepare_inputs_for_generation(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
@@ -196,6 +167,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
+        if image_infos is not None :
+            inputs['image_infos'] = image_infos
+
         return inputs
 
 AutoConfig.register("llava_llama", LlavaConfig)
