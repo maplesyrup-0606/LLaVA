@@ -19,15 +19,17 @@ import torch
 import torch.nn as nn
 import math
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
+# from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
+
+
+
 
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
-
-from llava.utils import visualize_attention
+from modifications.modeling_llama import LlamaConfig, LlamaModel, LlamaForCausalLM
 
 class LlavaConfig(LlamaConfig):
     model_type = "llava_llama"
@@ -38,7 +40,6 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
 
     def __init__(self, config: LlamaConfig):
         super(LlavaLlamaModel, self).__init__(config)
-
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
@@ -145,7 +146,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
         kwargs["image_infos"] = image_infos
-        print(kwargs)
 
         return super().generate(
             position_ids=position_ids,
