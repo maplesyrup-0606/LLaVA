@@ -92,7 +92,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes
             )
-
+        # print("LlavaLLamaForCausalLm -> image_info:",image_infos)
         result = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -103,7 +103,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict
+            return_dict=return_dict,
+            image_infos = image_infos
         )
 
         return result
@@ -167,8 +168,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
-        if image_infos is not None :
+        if image_infos is not None:
             inputs['image_infos'] = image_infos
+        # print("inputs ->",inputs) #NOTE: image_infos is here but somehow not in attention layer
 
         return inputs
 
