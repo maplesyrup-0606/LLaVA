@@ -367,9 +367,6 @@ class LlamaAttention(nn.Module):
         
         bsz, q_len, _ = hidden_states.size()
 
-        # if self.layer_idx == 1: 
-        #     print(image_infos)
-
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
             query_slices = self.q_proj.weight.split(
@@ -417,6 +414,13 @@ class LlamaAttention(nn.Module):
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
+        # if self.layer_idx == 1:
+            # print("key:",key_states.shape)
+            # print("query:",query_states.shape)
+            # print("attn weights:",attn_weights.shape)
+            # print("value:",value_states.shape)
+            # print(attention_mask)
+
         if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
             raise ValueError(
                 f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
@@ -429,6 +433,18 @@ class LlamaAttention(nn.Module):
                     f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
                 )
             attn_weights = attn_weights + attention_mask
+
+
+        # NOTE: Try applying negative -inf to attention weights residing in the contour
+        # Ex. Batch example :  [{'start_index': 35, 'num_patches': 576}]
+        batch_information = image_infos # Same as batch size : B x dict
+        # For now, since batch is always one, let's do one way and then we can progress
+        custom_mask = torch.zeros_like(attn_weights)
+        start_idx = batch_information[0]['start_index']
+        end_idx = start_idx + batch_information[0]['num_patches']
+        custom_mask[:, :, :, start_idx:end_idx] = float('-inf')
+
+        attn_weights += custom_mask
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
