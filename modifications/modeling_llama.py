@@ -435,16 +435,33 @@ class LlamaAttention(nn.Module):
             attn_weights = attn_weights + attention_mask
 
 
-        # NOTE: Try applying negative -inf to attention weights residing in the contour
+        # NOTE: Try applying negative -inf to attention weights residing in the contour, response seems aight, but results are iffy imo
         # Ex. Batch example :  [{'start_index': 35, 'num_patches': 576}]
         batch_information = image_infos # Same as batch size : B x dict
         # For now, since batch is always one, let's do one way and then we can progress
-        custom_mask = torch.zeros_like(attn_weights)
         start_idx = batch_information[0]['start_index']
         end_idx = start_idx + batch_information[0]['num_patches']
-        custom_mask[:, :, :, start_idx:end_idx] = float('-inf')
+        
+        side_len = int(math.sqrt(batch_information[0]['num_patches']))
+        contour = torch.zeros((side_len, side_len))
+
+        mask_degree = 0.5
+        mask_len = int((side_len // 2) * mask_degree)
+        
+        contour[:, :mask_len] = float('-inf')
+        contour[:, -mask_len:] = float('-inf')
+        contour[:mask_len, :] = float('-inf')
+        contour[-mask_len:, :] = float('-inf')
+
+        contour = contour.view((contour.shape[0] * contour.shape[1]))
+        contour = contour.view(1, 1, 1, -1)
+
+        custom_mask = torch.zeros_like(attn_weights)
+        custom_mask[:, :, :, start_idx : end_idx] = contour
 
         attn_weights += custom_mask
+
+        print("attention layer:",torch.isneginf(attn_weights).sum())
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)

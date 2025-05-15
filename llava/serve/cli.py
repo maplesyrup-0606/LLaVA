@@ -97,12 +97,14 @@ def main(args):
                 input_ids,
                 images=image_tensor,
                 image_sizes=[image_size],
-                # output_attentions=True, # NOTE: Added to visualize attention
+                output_attentions=True, # NOTE: Added to visualize attention
+                return_dict=True,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 max_new_tokens=args.max_new_tokens,
                 streamer=streamer,
                 use_cache=True)
+
 
         outputs = tokenizer.decode(output_ids[0]).strip()
         conv.messages[-1][-1] = outputs
