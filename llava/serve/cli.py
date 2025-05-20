@@ -25,8 +25,8 @@ def process_scanpaths(scanpaths) :
     """
 
     for scanpath in scanpaths :
-        scanpath['X'] =  (scanpath['X'] // 24).astype(int)
-        scanpath['Y'] = (scanpath['Y'] // 24).astype(int)
+        scanpath['X'] =  (scanpath['X'] // 14).astype(int)
+        scanpath['Y'] = (scanpath['Y'] // 14).astype(int)
     
     return scanpaths
 
@@ -119,6 +119,7 @@ def main(args):
     # print("done saving!")
 
     processed_scanpaths = process_scanpaths(new_scanpaths)
+    # print(processed_scanpaths)
 
     if type(image_tensor) is list:
         image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
@@ -158,7 +159,7 @@ def main(args):
                 input_ids,
                 images=image_tensor,
                 image_sizes=[image_size],
-                scan_paths=processed_scanpaths,
+                scanpaths=processed_scanpaths,
                 output_attentions=True, # NOTE: Added to visualize attention
                 return_dict=True,
                 do_sample=True if args.temperature > 0 else False,

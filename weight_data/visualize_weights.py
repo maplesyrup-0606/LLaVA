@@ -2,6 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F
+import os
 from PIL import Image
 
 def expand2square(pil_img, background_color) :
@@ -21,6 +22,7 @@ def expand2square(pil_img, background_color) :
 def visualize_attention(image_path, data_path, layer) :
     # image = Image.open('../room.jpg')
     # data = torch.load('weights_and_image.pt')
+    image_path = os.path.expanduser('~/NSERC/room.jpg')
     name = data_path[:-3]
     image = Image.open(image_path)
     data = torch.load(data_path)
@@ -62,5 +64,6 @@ def visualize_attention(image_path, data_path, layer) :
 
 if __name__ == '__main__' :
     # visualize_attention('../room.jpg', 'weights_and_image.pt', 7)
-    visualize_attention('../room.jpg', 'weights_and_image_specific_question.pt', 14)
-    visualize_attention('../room.jpg', 'weights_and_image_specific_question_without_custom.pt', 14)
+    # visualize_attention('../room.jpg', 'weights_and_image_specific_question.pt', 14)
+    # visualize_attention('../room.jpg', 'weights_and_image_specific_question_without_custom.pt', 14)
+    visualize_attention('~/NSERC/room.jpg', 'scanpath_masking.pt', 14)

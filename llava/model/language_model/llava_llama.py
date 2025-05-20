@@ -113,7 +113,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             'image_infos' : image_infos,
         }
 
-        # torch.save(data, 'weight_data/weights_and_image_specific_question_without_custom.pt')
+        torch.save(data, 'weight_data/scanpath_masking.pt')
 
         return result
 
@@ -186,7 +186,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['image_infos'] = image_infos
         if scanpaths is not None:
             inputs['scanpaths'] = scanpaths
-        # print("inputs ->",inputs) #NOTE: image_infos is here but somehow not in attention layer
 
         return inputs
 
