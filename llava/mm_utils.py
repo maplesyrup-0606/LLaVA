@@ -162,14 +162,35 @@ def expand2square(pil_img, background_color):
         return result
 
 
-def process_images(images, image_processor, model_cfg):
+def process_images(images, image_processor, model_cfg, scanpaths):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
     if image_aspect_ratio == 'pad':
-        for image in images:
+        for idx, image in enumerate(images):
+            scanpath = scanpaths[idx]
+            x, y = image.size[0], image.size[1]
             image = expand2square(image, tuple(int(x*255) for x in image_processor.image_mean))
+            new_x, new_y = image.size[0], image.size[1]
+
+            delta_x = new_x - x
+            delta_y = new_y - y
+
+            if delta_x == 0 :
+                translation = delta_y / 2
+                scanpath['Y'] += translation
+                
+            if delta_y == 0 :
+                translation = delta_x / 2
+                scanpath['X'] += translation
+            
+            scanpath['X'] *= 336 / new_x
+            scanpath['Y'] *= 336 / new_y
+            
+            # by this point we get 336 x 336 images
             image = image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
             new_images.append(image)
+        
+        return new_images, scanpaths
     elif image_aspect_ratio == "anyres":
         for image in images:
             image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)

@@ -34,4 +34,4 @@ ckpts*
 # Demo
 serve_images/
 
-attention_weights.pt
+weight_data/*.pt

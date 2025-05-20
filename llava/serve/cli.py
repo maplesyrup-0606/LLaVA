@@ -1,5 +1,6 @@
 import argparse
 import torch
+import os
 
 from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.conversation import conv_templates, SeparatorStyle
@@ -10,10 +11,56 @@ from llava.mm_utils import process_images, tokenizer_image_token, get_model_name
 from PIL import Image
 
 import requests
-from PIL import Image
 from io import BytesIO
 from transformers import TextStreamer
+import numpy as np
+import matplotlib.pyplot as plt
 
+def process_scanpaths(scanpaths) :
+    """
+    scanpaths: scanpaths per image rescaled to 336 x 336 for each image.
+
+    We convert each point in the scanpath to match the 24 x 24 grid 
+    of patches (in indices). 
+    """
+
+    for scanpath in scanpaths :
+        scanpath['X'] =  (scanpath['X'] // 24).astype(int)
+        scanpath['Y'] = (scanpath['Y'] // 24).astype(int)
+    
+    return scanpaths
+
+def plot_tensor_with_scanpath(image_tensor, scanpath, save_path, unnormalize=True):
+    """
+    image_tensor: torch.Tensor of shape [3, H, W]
+    scanpath: dict with 'X' and 'Y' (in pixel coordinates)
+    save_path: output file path (e.g. "out/scanpath_0.png")
+    unnormalize: whether to unnormalize the image for plotting
+    """
+    img = image_tensor.clone()
+
+    if unnormalize:
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        img = img * std + mean
+
+    img_np = img.cpu().numpy().transpose(1, 2, 0)  # [H, W, C]
+    img_np = np.clip(img_np, 0, 1)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_np)
+    
+    xs, ys = scanpath['X'], scanpath['Y']
+    ax.plot(xs, ys, marker='o', color='red', linewidth=1.5, alpha=0.6)
+
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        ax.text(x, y, str(i+1), color='yellow', fontsize=8, ha='center', va='center')
+
+    ax.axis('off')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+    return
 
 def load_image(image_file):
     if image_file.startswith('http://') or image_file.startswith('https://'):
@@ -49,6 +96,9 @@ def main(args):
     else:
         args.conv_mode = conv_mode
 
+    if args.scanpath is not None :
+        scanpaths = [np.load(os.path.expanduser(args.scanpath), allow_pickle=True).item()]
+
     conv = conv_templates[args.conv_mode].copy()
     if "mpt" in model_name.lower():
         roles = ('user', 'assistant')
@@ -57,13 +107,24 @@ def main(args):
 
     image = load_image(args.image_file)
     image_size = image.size
+
+
     # Similar operation in model_worker.py
-    image_tensor = process_images([image], image_processor, model.config)
+    image_tensor, new_scanpaths = process_images([image], image_processor, model.config, scanpaths)
+
+    # # NOTE:Sanity check to see if the resized scanpaths match
+    # for i in range(len(image_tensor)): 
+    #     save_path = f"scanpath_plots/scanpath_{i}.png"
+    #     plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
+    # print("done saving!")
+
+    processed_scanpaths = process_scanpaths(new_scanpaths)
+
     if type(image_tensor) is list:
         image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
     else:
         image_tensor = image_tensor.to(model.device, dtype=torch.float16)
-
+    
     while True:
         try:
             inp = input(f"{roles[0]}: ")
@@ -97,6 +158,7 @@ def main(args):
                 input_ids,
                 images=image_tensor,
                 image_sizes=[image_size],
+                scan_paths=processed_scanpaths,
                 output_attentions=True, # NOTE: Added to visualize attention
                 return_dict=True,
                 do_sample=True if args.temperature > 0 else False,
@@ -124,5 +186,6 @@ if __name__ == "__main__":
     parser.add_argument("--load-8bit", action="store_true")
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--scanpath", type=str, default="~/NSERC/scanpath.npy")
     args = parser.parse_args()
     main(args)

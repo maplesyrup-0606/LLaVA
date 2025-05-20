@@ -69,6 +69,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         images: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[List[List[int]]] = None,
         image_infos: Optional[List[dict]] = None,
+        scanpaths: Optional[List] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
@@ -102,11 +103,17 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            image_infos = image_infos
+            image_infos = image_infos,
+            scanpaths=scanpaths
         )
 
         attn_weights = result.attentions
-        torch.save(attn_weights, 'attention_weights.pt')
+        data = {
+            'attn_weights' : attn_weights,
+            'image_infos' : image_infos,
+        }
+
+        # torch.save(data, 'weight_data/weights_and_image_specific_question_without_custom.pt')
 
         return result
 
@@ -117,6 +124,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         images: Optional[torch.Tensor] = None,
         image_sizes: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
+        scanpaths: Optional[List] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
@@ -149,7 +157,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
         kwargs["image_infos"] = image_infos
-
+        kwargs["scanpaths"] = scanpaths
         results = super().generate(
             position_ids=position_ids,
             attention_mask=attention_mask,
@@ -165,6 +173,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
         image_infos = kwargs.pop("image_infos", None)
+        scanpaths = kwargs.pop("scanpaths", None)
 
         inputs = super().prepare_inputs_for_generation(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
@@ -175,6 +184,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['image_sizes'] = image_sizes
         if image_infos is not None:
             inputs['image_infos'] = image_infos
+        if scanpaths is not None:
+            inputs['scanpaths'] = scanpaths
         # print("inputs ->",inputs) #NOTE: image_infos is here but somehow not in attention layer
 
         return inputs

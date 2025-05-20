@@ -358,6 +358,7 @@ class LlamaAttention(nn.Module):
         output_attentions: bool = False,
         use_cache: bool = False,
         image_infos: Optional[List[dict]] = None,
+        scanpaths: Optional[List] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         if "padding_mask" in kwargs:
@@ -366,6 +367,8 @@ class LlamaAttention(nn.Module):
             )
         
         bsz, q_len, _ = hidden_states.size()
+
+        print(scanpaths)
 
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
@@ -459,9 +462,7 @@ class LlamaAttention(nn.Module):
         custom_mask = torch.zeros_like(attn_weights)
         custom_mask[:, :, :, start_idx : end_idx] = contour
 
-        attn_weights += custom_mask
-
-        print("attention layer:",torch.isneginf(attn_weights).sum())
+        # attn_weights += custom_mask
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
@@ -805,6 +806,7 @@ class LlamaDecoderLayer(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         image_infos: Optional[List[dict]] = None,
+        scanpaths: Optional[List] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -838,6 +840,7 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
             image_infos=image_infos,
+            scanpaths=scanpaths,
             **kwargs,
         )
         hidden_states = residual + hidden_states
