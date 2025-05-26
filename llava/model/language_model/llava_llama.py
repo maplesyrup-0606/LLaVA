@@ -91,7 +91,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes
             )
-        # print("LlavaLLamaForCausalLm -> image_info:",image_infos)
+
         result = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -112,8 +112,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             'attn_weights' : attn_weights,
             'image_infos' : image_infos,
         }
-
-        torch.save(data, 'weight_data/scanpath_masking.pt')
 
         return result
 
@@ -165,6 +163,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             **kwargs
         )
+
+        results['image_infos'] = image_infos
 
         return results
 

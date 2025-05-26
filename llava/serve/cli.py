@@ -6,7 +6,7 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 from llava.conversation import conv_templates, SeparatorStyle
 from llava.model.builder import load_pretrained_model
 from llava.utils import disable_torch_init
-from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path
+from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, process_scanpaths
 
 from PIL import Image
 
@@ -15,20 +15,6 @@ from io import BytesIO
 from transformers import TextStreamer
 import numpy as np
 import matplotlib.pyplot as plt
-
-def process_scanpaths(scanpaths) :
-    """
-    scanpaths: scanpaths per image rescaled to 336 x 336 for each image.
-
-    We convert each point in the scanpath to match the 24 x 24 grid 
-    of patches (in indices). 
-    """
-
-    for scanpath in scanpaths :
-        scanpath['X'] =  (scanpath['X'] // 14).astype(int)
-        scanpath['Y'] = (scanpath['Y'] // 14).astype(int)
-    
-    return scanpaths
 
 def plot_tensor_with_scanpath(image_tensor, scanpath, save_path, unnormalize=True):
     """
@@ -77,7 +63,7 @@ def main(args):
 
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, args.load_8bit, args.load_4bit, device=args.device)
-
+    breakpoint()
     if "llama-2" in model_name.lower():
         conv_mode = "llava_llama_2"
     elif "mistral" in model_name.lower():
@@ -113,10 +99,10 @@ def main(args):
     image_tensor, new_scanpaths = process_images([image], image_processor, model.config, scanpaths)
 
     # # NOTE:Sanity check to see if the resized scanpaths match
-    # for i in range(len(image_tensor)): 
-    #     save_path = f"scanpath_plots/scanpath_{i}.png"
-    #     plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
-    # print("done saving!")
+    for i in range(len(image_tensor)): 
+        save_path = f"scanpath_plots/scanpath_{i}.png"
+        plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
+    print("done saving!")
 
     processed_scanpaths = process_scanpaths(new_scanpaths)
     # print(processed_scanpaths)
@@ -161,15 +147,20 @@ def main(args):
                 image_sizes=[image_size],
                 scanpaths=processed_scanpaths,
                 output_attentions=True, # NOTE: Added to visualize attention
-                return_dict=True,
+                return_dict_in_generate=True,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 max_new_tokens=args.max_new_tokens,
                 streamer=streamer,
                 use_cache=True)
 
+            attn_weights_and_image_infos = {}
+            attn_weights_and_image_infos['attentions'] = output_ids.attentions
+            attn_weights_and_image_infos['image_infos'] = output_ids.image_infos
+            save_path = os.path.expanduser('~/NSERC/LLaVA/weight_data/image_2_without_gaussian.pt')
+            # torch.save(attn_weights_and_image_infos, save_path)
 
-        outputs = tokenizer.decode(output_ids[0]).strip()
+        outputs = tokenizer.decode(output_ids.sequences[0]).strip()
         conv.messages[-1][-1] = outputs
         if args.debug:
             print("\n", {"prompt": prompt, "outputs": outputs}, "\n")

@@ -8,6 +8,24 @@ import ast
 from transformers import StoppingCriteria
 from llava.constants import IMAGE_TOKEN_INDEX
 
+def process_scanpaths(scanpaths) :
+    """
+    scanpaths: scanpaths per image rescaled to 336 x 336 for each image.
+
+    We convert each point in the scanpath to match the 24 x 24 grid 
+    of patches (in indices). 
+
+    We can also add one more way of processsing these scanpaths:
+        - We can add patches on the trajectory of point 'n' to point 'n+1'.
+    
+    NOTE: Should remove duplicates
+    """
+
+    for scanpath in scanpaths :
+        scanpath['X'] =  (scanpath['X'] // 14).astype(int)
+        scanpath['Y'] = (scanpath['Y'] // 14).astype(int)
+    
+    return scanpaths
 
 def select_best_resolution(original_size, possible_resolutions):
     """
