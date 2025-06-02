@@ -163,9 +163,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             **kwargs
         )
-
         results['image_infos'] = image_infos
-
         return results
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None,

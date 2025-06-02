@@ -3,12 +3,14 @@ from io import BytesIO
 import base64
 import torch
 import math
+import numpy as np
 import ast
 
 from transformers import StoppingCriteria
 from llava.constants import IMAGE_TOKEN_INDEX
 
-def process_scanpaths(scanpaths) :
+
+def process_scanpaths(scanpaths, mode=0) :
     """
     scanpaths: scanpaths per image rescaled to 336 x 336 for each image.
 
@@ -18,14 +20,79 @@ def process_scanpaths(scanpaths) :
     We can also add one more way of processsing these scanpaths:
         - We can add patches on the trajectory of point 'n' to point 'n+1'.
     
-    NOTE: Should remove duplicates
+    
     """
 
-    for scanpath in scanpaths :
-        scanpath['X'] =  (scanpath['X'] // 14).astype(int)
-        scanpath['Y'] = (scanpath['Y'] // 14).astype(int)
+    processed = []
+    if mode == 0 :
     
-    return scanpaths
+        for scanpath in scanpaths :
+            points = scanpath[0]
+            xs = (points['X'] // 14).astype(int)
+            ys = (points['Y'] // 14).astype(int)
+            coords = list(zip(xs, ys)) 
+            coords_without_dup = []
+            visited = set() 
+
+            for coord in coords :
+                if coord in visited :
+                    continue
+                    
+                visited.add(coord)
+                coords_without_dup.append(coord)
+            processed.append(coords_without_dup)
+        return processed
+    
+    elif mode == 1 : # Bresenham's line algorithm
+        for scanpath in scanpaths :
+            points = scanpath
+            xs = (points['X'] // 14).astype(int)
+            ys = (points['Y'] // 14).astype(int)
+            coords = list(zip(xs, ys))
+
+            coords_without_dup = []
+            visited = set()
+            prev = None
+
+            for coord in coords :
+                if prev is not None :
+                    x0, y0 = prev[0], prev[1]
+                    x1, y1 = coord[0], coord[1] 
+
+                    dx = abs(x1 - x0)
+                    sx =  1 if x0 < x1 else -1
+                    dy = -abs(y1 - y0)
+                    sy = 1 if y0 < y1 else -1 
+                    error = dx + dy 
+
+                    while True :
+                        if (x0, y0) not in visited :
+                            coords_without_dup.append((x0, y0))
+                            visited.add((x0, y0))
+
+                        if x0 == x1 and y0 == y1 :
+                            break
+
+                        e2 = 2*error 
+                        if e2 >= dy :
+                            error += dy
+                            x0 += sx 
+                        
+                        if e2 <= dx :
+                            error += dx 
+                            y0 += sy 
+                    
+                else :
+                    if coord not in visited :
+                        coords_without_dup.append(coord)
+                        visited.add(coord)
+
+                prev = coord
+            processed.append(coords_without_dup)
+        return processed
+
+    else :
+        raise ValueError("Unsupported Mode")
 
 def select_best_resolution(original_size, possible_resolutions):
     """
@@ -185,14 +252,13 @@ def process_images(images, image_processor, model_cfg, scanpaths):
     new_images = []
     if image_aspect_ratio == 'pad':
         for idx, image in enumerate(images):
-            scanpath = scanpaths[idx]
+            scanpath = scanpaths[idx][0]
             x, y = image.size[0], image.size[1]
             image = expand2square(image, tuple(int(x*255) for x in image_processor.image_mean))
             new_x, new_y = image.size[0], image.size[1]
 
             delta_x = new_x - x
             delta_y = new_y - y
-
             if delta_x == 0 :
                 translation = delta_y / 2
                 scanpath['Y'] += translation

@@ -432,59 +432,56 @@ class LlamaAttention(nn.Module):
         #######################################################################################################
         # NOTE: This is what we would do if we were drop patches not on the gaze patternsw
         # custom_mask = torch.zeros_like(attn_weights)
+        # kept_patches = []
         # for b, image_info in enumerate(image_infos) :
         #     start_idx = image_info['start_index']
         #     end_idx = start_idx + image_info['num_patches']
             
-        #     custom_mask[:, :, :, start_idx : end_idx] = float('-inf')
+        #     custom_mask[b, :, :, start_idx : end_idx] = float('-inf')
             
-        #     for x, y in zip(scanpaths[b]['X'], scanpaths[b]['Y']) :
+        #     kept = 0
+        #     for x, y in scanpaths[b] :
         #         target_idx = start_idx + x + y * 24
         #         custom_mask[b, :, :, target_idx] = 0.0
-        
+        #         kept += 1
+            
+        #     kept_patches.append(kept)
         # attn_weights += custom_mask
 
         #######################################################################################################
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
         #######################################################################################################
-        # NOTE: This is the gaussian weighting of patches with gaze-patterns
-        # B, C, H, _ = attn_weights.shape
-        # sigma = 4.0
-        # x_coords, y_coords = torch.arange(24), torch.arange(24) # 0 ~ 23 for both x and y
-        # Y, X = torch.meshgrid(y_coords, x_coords, indexing='ij')
+        # # NOTE: This is the gaussian weighting of patches with gaze-patterns
+        B, C, H, _ = attn_weights.shape
+        sigma = 4.0
+        x_coords, y_coords = torch.arange(24), torch.arange(24) # 0 ~ 23 for both x and y
+        Y, X = torch.meshgrid(y_coords, x_coords, indexing='ij')
         
-        # dropped_patches = torch.zeros((B))
-        # for b, image_info in enumerate(image_infos) :
-        #     gaussian = torch.zeros((24, 24), device=attn_weights.device)
+        dropped_patches = torch.zeros((B))
+        for b, image_info in enumerate(image_infos) :
+            gaussian = torch.zeros((24, 24), device=attn_weights.device)
         
-        #     start_idx = image_info['start_index']
-        #     end_idx = start_idx + image_info['num_patches']
+            start_idx = image_info['start_index']
+            end_idx = start_idx + image_info['num_patches']
 
-        #     visited = set()
-        #     for x, y in zip(scanpaths[b]['X'], scanpaths[b]['Y']) :
-        #         if (x, y) in visited :
-        #             continue
-                
-        #         visited.add((x, y))
-        #         g = torch.exp(-((X - x) ** 2 + (Y - y) ** 2) / (2 * (sigma ** 2))).to(device=attn_weights.device)
+            for x, y in scanpaths[b] :
+                g = torch.exp(-((X - x) ** 2 + (Y - y) ** 2) / (2 * (sigma ** 2))).to(device=attn_weights.device)
 
-        #         gaussian += g
-        #         gaussian = gaussian / gaussian.max()
+                gaussian += g
+            gaussian = gaussian / gaussian.max()
 
-        #     gaussian = gaussian.view(1, 1, 576)
-        #     attn_weights[b, :, :, start_idx : end_idx] *= gaussian
-        #     num_dropped = (attn_weights[b, :, :, start_idx : end_idx] <= 0.5).sum()
-        #     dropped_patches[b] = num_dropped
-        #     kwargs['dropped_patches'] = dropped_patches # NOTE: have to see if this is the appropriate way to propagate patches
+            gaussian = gaussian.view(1, 1, 576)
+            attn_weights[b, :, :, start_idx : end_idx] *= gaussian
+            num_dropped = (attn_weights[b, :, :, start_idx : end_idx] <= 0.5).all(dim=0).all(dim=1).sum()
+            dropped_patches[b] = num_dropped
+        kwargs['dropped_patches'] = dropped_patches # NOTE: have to see if this is the appropriate way to propagate patches
 
-        
-        # attn_weights = attn_weights / attn_weights.sum(dim=-1, keepdim=True)
+        attn_weights = attn_weights / attn_weights.sum(dim=-1, keepdim=True)
 
         #########################################################################################################################
-
+        # NOTE: Reminder, need to try propagating the number of patches utilized before running the whole batch
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
 

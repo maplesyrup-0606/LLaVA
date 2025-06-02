@@ -322,6 +322,19 @@ conv_llava_v0_mmtag = Conversation(
     version="v0_mmtag",
 )
 
+# conv_llava_v1 = Conversation(
+#     system="A chat between a curious human and an artificial intelligence assistant. "
+#            "The assistant gives helpful, detailed, and polite answers to the human's questions.",
+#     roles=("USER", "ASSISTANT"),
+#     version="v1",
+#     messages=(),
+#     offset=0,
+#     sep_style=SeparatorStyle.TWO,
+#     sep=" ",
+#     sep2="</s>",
+# )
+
+# NOTE: Tuned version for image captioning
 conv_llava_v1 = Conversation(
     system="A chat between a curious human and an artificial intelligence assistant. "
            "The assistant gives helpful, detailed, and polite answers to the human's questions.",

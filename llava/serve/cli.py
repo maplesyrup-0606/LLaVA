@@ -63,7 +63,6 @@ def main(args):
 
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, args.load_8bit, args.load_4bit, device=args.device)
-    breakpoint()
     if "llama-2" in model_name.lower():
         conv_mode = "llava_llama_2"
     elif "mistral" in model_name.lower():
@@ -83,7 +82,7 @@ def main(args):
         args.conv_mode = conv_mode
 
     if args.scanpath is not None :
-        scanpaths = [np.load(os.path.expanduser(args.scanpath), allow_pickle=True).item()]
+        scanpaths = [[np.load(os.path.expanduser(args.scanpath), allow_pickle=True).item()]]
 
     conv = conv_templates[args.conv_mode].copy()
     if "mpt" in model_name.lower():
@@ -99,10 +98,10 @@ def main(args):
     image_tensor, new_scanpaths = process_images([image], image_processor, model.config, scanpaths)
 
     # # NOTE:Sanity check to see if the resized scanpaths match
-    for i in range(len(image_tensor)): 
-        save_path = f"scanpath_plots/scanpath_{i}.png"
-        plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
-    print("done saving!")
+    # for i in range(len(image_tensor)): 
+    #     save_path = f"scanpath_plots/scanpath_{i}.png"
+    #     plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
+    # print("done saving!")
 
     processed_scanpaths = process_scanpaths(new_scanpaths)
     # print(processed_scanpaths)
@@ -153,7 +152,7 @@ def main(args):
                 max_new_tokens=args.max_new_tokens,
                 streamer=streamer,
                 use_cache=True)
-
+            
             attn_weights_and_image_infos = {}
             attn_weights_and_image_infos['attentions'] = output_ids.attentions
             attn_weights_and_image_infos['image_infos'] = output_ids.image_infos
