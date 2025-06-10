@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import math
+import os
 
 from transformers import AutoConfig, AutoModelForCausalLM
 # from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
@@ -106,12 +107,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             image_infos = image_infos,
             scanpaths=scanpaths
         )
-
-        attn_weights = result.attentions
-        data = {
-            'attn_weights' : attn_weights,
-            'image_infos' : image_infos,
-        }
 
         return result
 

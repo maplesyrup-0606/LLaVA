@@ -20,12 +20,14 @@ def process_scanpaths(scanpaths, mode=0) :
     We can also add one more way of processsing these scanpaths:
         - We can add patches on the trajectory of point 'n' to point 'n+1'.
     
-    
+    mode 0 : convert scanpath coordinates into the patch grids
+
+    mode 1 : trajectory based. uses bresenham's line algorithm to get a 
+             line that represents the trajectory of the scanpaths
     """
 
     processed = []
     if mode == 0 :
-    
         for scanpath in scanpaths :
             points = scanpath[0]
             xs = (points['X'] // 14).astype(int)
@@ -45,7 +47,7 @@ def process_scanpaths(scanpaths, mode=0) :
     
     elif mode == 1 : # Bresenham's line algorithm
         for scanpath in scanpaths :
-            points = scanpath
+            points = scanpath[0]
             xs = (points['X'] // 14).astype(int)
             ys = (points['Y'] // 14).astype(int)
             coords = list(zip(xs, ys))

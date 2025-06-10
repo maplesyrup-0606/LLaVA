@@ -243,8 +243,6 @@ class LlavaMetaForCausalLM(ABC):
         new_labels = []
         cur_image_idx = 0
 
-        # NOTE: this was confusing for me at first, but we loop since in training time we have a batch of inputs
-        # in actual inference, we do it once
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             
