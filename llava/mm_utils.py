@@ -28,6 +28,7 @@ def process_scanpaths(scanpaths, mode=0) :
 
     processed = []
     if mode == 0 :
+        print("Processing no trajectory...", flush=True)
         for scanpath in scanpaths :
             points = scanpath[0]
             xs = (points['X'] // 14).astype(int)
@@ -46,6 +47,7 @@ def process_scanpaths(scanpaths, mode=0) :
         return processed
     
     elif mode == 1 : # Bresenham's line algorithm
+        print("Processing with trajectory...", flush=True)
         for scanpath in scanpaths :
             points = scanpath[0]
             xs = (points['X'] // 14).astype(int)

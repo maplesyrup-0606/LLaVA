@@ -7,7 +7,9 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F
+import sys
 
+from tqdm import tqdm
 from PIL import Image
 from llava.utils import disable_torch_init
 from llava.model.builder import load_pretrained_model
@@ -156,11 +158,10 @@ def main(args) :
     if args.weights_dir is not None :
         weights_dir = args.weights_dir
         os.makedirs(weights_dir, exist_ok=True)
-    
+    if args.trajectory is not None :
+        mode = args.trajectory
     print(f"✅ Running Job, with parameters \n scanpaths : {scanpaths_dir} \n images : {images_dir} \n weights : {weights_dir}")
 
-
-    mode = 1 if "trajectory" in weights_dir else 0
     # Caption prompt
 
     questions = [
@@ -183,8 +184,8 @@ def main(args) :
     image_ids = list(captions_file.keys())
 
     for question_num, question in enumerate(questions) :
-        for i in range(0, len(image_ids), BATCH_SIZE):
-        # for i in range(0, 100, BATCH_SIZE) :
+        total_batches = (len(image_ids) + BATCH_SIZE - 1) // BATCH_SIZE
+        for i in tqdm(range(0, len(image_ids), BATCH_SIZE), total=total_batches, ascii=True, file=sys.stdout):
     
             batch_keys = image_ids[i : i + BATCH_SIZE]
             prompts = []
@@ -232,7 +233,7 @@ def main(args) :
                         use_cache=True)
             
             # Code for trying to save attention heat maps for image-question attention
-            if question_num == 0 and i <= 16 :
+            if question_num == 0 and i < 16 :
                 weights = output_ids['attentions']
                 image_infos = output_ids['image_infos']
                 data = {
@@ -241,7 +242,7 @@ def main(args) :
                     'all_image_ids': all_image_ids,
                 }
                 torch.save(data, os.path.join(weights_dir, f"{i // BATCH_SIZE}_weights.pt"))
-                print(f"Saved weights for batch : {i // BATCH_SIZE}!", flush=True)
+                print(f"Saved weights to {weights_dir} ✅", flush=True)
 
             outputs = tokenizer.batch_decode(output_ids['sequences'], skip_special_tokens=True)
 
@@ -276,6 +277,6 @@ if __name__ == "__main__" :
     parser.add_argument("--captions-file", type=str, default=None)
     parser.add_argument("--images-dir", type=str, default=None)
     parser.add_argument("--weights-dir", type=str, default=None)
-    
+    parser.add_argument("--trajectory", type=int, default=0)
     args = parser.parse_args()
     main(args)

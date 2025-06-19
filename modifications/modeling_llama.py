@@ -352,8 +352,11 @@ class LlamaAttention(nn.Module):
     
     def apply_gaze_mask(self, attn_weights, image_infos, scanpaths, grid_size=24, margin=0) :
         custom_mask = torch.zeros_like(attn_weights)
+        # print(f"Margin is {margin}")
         for b, image_info in enumerate(image_infos) :
-            if len(scanpaths[b]) == 0 : continue
+            if len(scanpaths[b]) == 0 : 
+                print("No scanpaths..",flush=True)
+                continue
 
             start_idx = image_info['start_index']
             end_idx = start_idx + image_info['num_patches']
@@ -485,11 +488,12 @@ class LlamaAttention(nn.Module):
             attn_weights = attn_weights + attention_mask
             
         #######################################################################################################
-        # NOTE: This is what we would do if we were drop patches not on the gaze patternsw
-        
-        # custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=0)
-        
-        # attn_weights += custom_mask
+        # NOTE: Patch dropping for non-gaze patches
+        # if self.layer_idx >= 15 :
+        #     margin = 1
+        #     custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
+                
+        #     attn_weights += custom_mask
         #######################################################################################################
 
         # upcast attention to fp32
@@ -497,8 +501,8 @@ class LlamaAttention(nn.Module):
 
         #######################################################################################################
         # NOTE: This is the gaussian weighting of patches with gaze-patterns
-
-        # attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
+        if self.layer_idx >= 15 :
+            attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
         #########################################################################################################################
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
