@@ -11,7 +11,7 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict, Any
 
 import torch
 import torch.nn as nn
@@ -71,6 +71,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
+        mask_type: Optional[Dict[str, Any]] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
@@ -105,7 +106,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             image_infos = image_infos,
-            scanpaths=scanpaths
+            scanpaths=scanpaths,
+            mask_type=mask_type
         )
 
         return result
@@ -167,7 +169,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         image_sizes = kwargs.pop("image_sizes", None)
         image_infos = kwargs.pop("image_infos", None)
         scanpaths = kwargs.pop("scanpaths", None)
-
+        mask_type = kwargs.pop("mask_type", None)
         inputs = super().prepare_inputs_for_generation(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
@@ -179,7 +181,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['image_infos'] = image_infos
         if scanpaths is not None:
             inputs['scanpaths'] = scanpaths
-
+        if mask_type is not None :
+            inputs['mask_type'] = mask_type
         return inputs
 
 AutoConfig.register("llava_llama", LlavaConfig)

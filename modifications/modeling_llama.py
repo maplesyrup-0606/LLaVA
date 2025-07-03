@@ -20,7 +20,7 @@
 """ PyTorch LLaMA model."""
 import math
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict, Any
 
 import torch
 import torch.nn.functional as F
@@ -353,6 +353,9 @@ class LlamaAttention(nn.Module):
     def apply_gaze_mask(self, attn_weights, image_infos, scanpaths, grid_size=24, margin=0) :
         custom_mask = torch.zeros_like(attn_weights)
         # print(f"Margin is {margin}")
+        if not any(scanpaths) :
+            return custom_mask
+        
         for b, image_info in enumerate(image_infos) :
             if len(scanpaths[b]) == 0 : 
                 print("No scanpaths..",flush=True)
@@ -418,6 +421,7 @@ class LlamaAttention(nn.Module):
         use_cache: bool = False,
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
+        mask_type: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         if "padding_mask" in kwargs:
@@ -489,11 +493,15 @@ class LlamaAttention(nn.Module):
             
         #######################################################################################################
         # NOTE: Patch dropping for non-gaze patches
-        # if self.layer_idx >= 15 :
-        #     margin = 1
-        #     custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
-                
-        #     attn_weights += custom_mask
+        if mask_type["type"] == "non-gaussian" :
+            margin = mask_type["margin"]
+            if "target-layer" in mask_type :
+                if self.layer_idx == mask_type["target-layer"] :
+                    custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
+                    attn_weights += custom_mask
+            else :
+                custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
+                attn_weights += custom_mask
         #######################################################################################################
 
         # upcast attention to fp32
@@ -501,9 +509,14 @@ class LlamaAttention(nn.Module):
 
         #######################################################################################################
         # NOTE: This is the gaussian weighting of patches with gaze-patterns
-        if self.layer_idx >= 15 :
-            attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
+        if mask_type["type"] == "gaussian" :
+            if "target-layer" in mask_type :
+                if self.layer_idx == mask_type["target-layer"] :
+                    attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
+            else :
+                attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
         #########################################################################################################################
+        
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
 
@@ -845,6 +858,7 @@ class LlamaDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
+        mask_type: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -879,6 +893,7 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
             image_infos=image_infos,
             scanpaths=scanpaths,
+            mask_type=mask_type,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -1061,6 +1076,7 @@ class LlamaModel(LlamaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
+        mask_type: Optional[Dict[str, Any]] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1155,6 +1171,7 @@ class LlamaModel(LlamaPreTrainedModel):
                     use_cache=use_cache,
                     image_infos=image_infos,
                     scanpaths=scanpaths,
+                    mask_type=mask_type,
                 )
 
             hidden_states = layer_outputs[0]
@@ -1230,6 +1247,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         return_dict: Optional[bool] = None,
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
+        mask_type: Optional[Dict[str, Any]] = None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -1274,7 +1292,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             image_infos=image_infos,
-            scanpaths=scanpaths
+            scanpaths=scanpaths,
+            mask_type=mask_type
         )
 
         hidden_states = outputs[0]

@@ -6,12 +6,14 @@ class PatchedLlavaLlamaForCausalLM(LlavaLlamaForCausalLM):
     def _validate_model_kwargs(self, model_kwargs : Dict[str, Any]) :
         image_infos = model_kwargs.pop("image_infos", None)
         scanpaths = model_kwargs.pop("scanpaths", None)
+        mask_type = model_kwargs.pop("mask_type", None)
         super()._validate_model_kwargs(model_kwargs)
         
         if image_infos is not None :
             model_kwargs['image_infos'] = image_infos
         if scanpaths is not None :
             model_kwargs['scanpaths'] = scanpaths
-
+        if mask_type is not None :
+            model_kwargs['mask_type'] = mask_type
         return
     

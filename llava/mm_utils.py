@@ -25,11 +25,14 @@ def process_scanpaths(scanpaths, mode=0) :
     mode 1 : trajectory based. uses bresenham's line algorithm to get a 
              line that represents the trajectory of the scanpaths
     """
-
+    
     processed = []
     if mode == 0 :
         print("Processing no trajectory...", flush=True)
         for scanpath in scanpaths :
+            if not scanpath or not scanpath[0]:
+                processed.append([])
+                continue
             points = scanpath[0]
             xs = (points['X'] // 14).astype(int)
             ys = (points['Y'] // 14).astype(int)
@@ -49,6 +52,10 @@ def process_scanpaths(scanpaths, mode=0) :
     elif mode == 1 : # Bresenham's line algorithm
         print("Processing with trajectory...", flush=True)
         for scanpath in scanpaths :
+            if not scanpath or not scanpath[0]:
+                processed.append([])
+                continue
+
             points = scanpath[0]
             xs = (points['X'] // 14).astype(int)
             ys = (points['Y'] // 14).astype(int)
@@ -263,16 +270,17 @@ def process_images(images, image_processor, model_cfg, scanpaths):
 
             delta_x = new_x - x
             delta_y = new_y - y
-            if delta_x == 0 :
-                translation = delta_y / 2
-                scanpath['Y'] += translation
+            if scanpath :
+                if delta_x == 0 :
+                    translation = delta_y / 2
+                    scanpath['Y'] += translation
+                    
+                if delta_y == 0 :
+                    translation = delta_x / 2
+                    scanpath['X'] += translation
                 
-            if delta_y == 0 :
-                translation = delta_x / 2
-                scanpath['X'] += translation
-            
-            scanpath['X'] *= 336 / new_x
-            scanpath['Y'] *= 336 / new_y
+                scanpath['X'] *= 336 / new_x
+                scanpath['Y'] *= 336 / new_y
             
             # by this point we get 336 x 336 images
             image = image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]

@@ -232,8 +232,11 @@ def main(args) :
                         max_new_tokens=args.max_new_tokens,
                         use_cache=True)
             
+
+            outputs = tokenizer.batch_decode(output_ids['sequences'], skip_special_tokens=True)
+            
             # Code for trying to save attention heat maps for image-question attention
-            if question_num == 0 and i < 16 :
+            if question_num == 0 and i < 8 :
                 weights = output_ids['attentions']
                 image_infos = output_ids['image_infos']
                 data = {
@@ -243,8 +246,7 @@ def main(args) :
                 }
                 torch.save(data, os.path.join(weights_dir, f"{i // BATCH_SIZE}_weights.pt"))
                 print(f"Saved weights to {weights_dir} ✅", flush=True)
-
-            outputs = tokenizer.batch_decode(output_ids['sequences'], skip_special_tokens=True)
+                print(f"Sample outputs : {outputs}")
 
             # question_image_attention_viewer(all_image_ids,data)
             for j in range(len(outputs)) :
@@ -252,7 +254,7 @@ def main(args) :
                 cur_output = outputs[j]
                 output_captions[cur_id].append(cur_output)
     
-            print(f"Done batch {i // BATCH_SIZE}!", flush=True)
+            # print(f"Done batch {i // BATCH_SIZE}!", flush=True)
     
     answers_file = args.answers_file
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
