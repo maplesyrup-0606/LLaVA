@@ -25,6 +25,7 @@ from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH
 
 from llava.mm_utils import get_anyres_image_grid_shape
 
+## TODO: This is the architecture of LLaVa, investigate where to inject our attention mask and implement
 
 class LlavaMetaModel:
 
@@ -58,7 +59,7 @@ class LlavaMetaModel:
         if self.get_vision_tower() is None:
             vision_tower = build_vision_tower(model_args)
 
-            if fsdp is not None and len(fsdp) > 0:
+            if fsdp is not None and len(fsdp) > 0: # fully sharder data parallel, sharding stuff across GPUs
                 self.vision_tower = [vision_tower]
             else:
                 self.vision_tower = vision_tower
@@ -148,7 +149,7 @@ class LlavaMetaForCausalLM(ABC):
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
@@ -156,6 +157,8 @@ class LlavaMetaForCausalLM(ABC):
             concat_images = torch.cat([image for image in images], dim=0)
             image_features = self.encode_images(concat_images)
             split_sizes = [image.shape[0] for image in images]
+            
+            # get back image features again
             image_features = torch.split(image_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
             image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
@@ -207,30 +210,43 @@ class LlavaMetaForCausalLM(ABC):
 
         # Let's just add dummy tensors if they do not exist,
         # it is a headache to deal with None all the time.
-        # But it is not ideal, and if you have a better idea,
+        # But it is not ideal, and if you have a better idea,``
         # please open an issue / submit a PR, thanks.
-        _labels = labels
-        _position_ids = position_ids
+
+        _labels = labels # target sequence for loss computation
+        _position_ids = position_ids # position of token in input sequence
         _attention_mask = attention_mask
+
+
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids, dtype=torch.bool)
         else:
             attention_mask = attention_mask.bool()
+        
         if position_ids is None:
             position_ids = torch.arange(0, input_ids.shape[1], dtype=torch.long, device=input_ids.device)
+        
         if labels is None:
             labels = torch.full_like(input_ids, IGNORE_INDEX)
 
         # remove the padding using attention_mask -- FIXME
-        _input_ids = input_ids
+
+
+        _input_ids = input_ids # tokenized input sequence the model processses, for embeddings
+
+        # boolean indexing : only keeps the input_ids , labels where the attention_mask is `True`
         input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
         labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
 
+        images_infos = []
         new_input_embeds = []
         new_labels = []
         cur_image_idx = 0
+
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+            
+            # if no images
             if num_images == 0:
                 cur_image_features = image_features[cur_image_idx]
                 cur_input_embeds_1 = self.get_model().embed_tokens(cur_input_ids)
@@ -240,25 +256,46 @@ class LlavaMetaForCausalLM(ABC):
                 cur_image_idx += 1
                 continue
 
+            # finds image tokens, -1 and shape[0] are appended for boundaries
+            # NOTE : boundaries are added to indicate where to split the sequence into chunks
             image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
             cur_labels_noim = []
+
+            image_start_index = image_token_indices[1]
+
+            num_patches = image_features[cur_image_idx].shape[0]
+            
+            image_info = {
+                "start_index" : image_start_index,
+                "num_patches" : num_patches
+            }
+
+            images_infos.append(image_info)
+
+            # finds input_ids / labels where there are no images
             for i in range(len(image_token_indices) - 1):
                 cur_input_ids_noim.append(cur_input_ids[image_token_indices[i]+1:image_token_indices[i+1]])
                 cur_labels_noim.append(cur_labels[image_token_indices[i]+1:image_token_indices[i+1]])
+            
+            # chunk sizes
             split_sizes = [x.shape[0] for x in cur_labels_noim]
+            
             cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
-            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
+            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0) # makes the chunks
             cur_new_input_embeds = []
             cur_new_labels = []
 
+            # reconstructs sequence with text embeddings, image features and labels 
+            # after this point, each patch would be treated as an image
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
                 cur_new_labels.append(cur_labels_noim[i])
                 if i < num_images:
                     cur_image_features = image_features[cur_image_idx]
                     cur_image_idx += 1
+                    # NOTE: HERE is the part that the patches are being added.
                     cur_new_input_embeds.append(cur_image_features)
                     cur_new_labels.append(torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype))
 
@@ -266,7 +303,6 @@ class LlavaMetaForCausalLM(ABC):
 
             cur_new_input_embeds = torch.cat(cur_new_input_embeds)
             cur_new_labels = torch.cat(cur_new_labels)
-
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
 
@@ -306,22 +342,24 @@ class LlavaMetaForCausalLM(ABC):
                     attention_mask[i, :cur_len] = True
                     position_ids[i, :cur_len] = torch.arange(0, cur_len, dtype=position_ids.dtype, device=position_ids.device)
 
+        # by this point, the attention mask will have paddings False and non-paddings True
+        # non-padding refers to a combination of text + image
         new_input_embeds = torch.stack(new_input_embeds_padded, dim=0)
 
         if _labels is None:
             new_labels = None
         else:
             new_labels = new_labels_padded
-
+        
         if _attention_mask is None:
             attention_mask = None
         else:
             attention_mask = attention_mask.to(dtype=_attention_mask.dtype)
-
+        
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, images_infos
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:

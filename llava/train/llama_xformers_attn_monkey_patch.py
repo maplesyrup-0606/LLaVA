@@ -86,7 +86,7 @@ def xformers_forward(
                 query_states,
                 key_states,
                 value_states,
-                attn_bias=xformers.ops.LowerTriangularMask(),
+                attn_bias=xformers.ops.LowerTriangularMask(), # NOTE: This is where the causal masking happens
             )
         attn_weights = None
     else:

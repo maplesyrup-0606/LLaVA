@@ -1,19 +1,95 @@
 import argparse
 import torch
+import os
 
 from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.conversation import conv_templates, SeparatorStyle
 from llava.model.builder import load_pretrained_model
 from llava.utils import disable_torch_init
-from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path
+from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, process_scanpaths
 
 from PIL import Image
 
 import requests
-from PIL import Image
 from io import BytesIO
 from transformers import TextStreamer
+import numpy as np
+import matplotlib.pyplot as plt
 
+
+def plot_tensor_with_patch_indices(image_tensor, patch_scanpath, save_path, patch_size=14, unnormalize=True):
+    """
+    Plots image with patch-based scanpath (as list of (x, y) tuples).
+
+    Args:
+        image_tensor (torch.Tensor): shape [3, H, W]
+        patch_scanpath (list): [(x1, y1), (x2, y2), ...] in patch indices (0–23)
+        save_path (str): output file path
+        patch_size (int): patch width/height in pixels (default 14 for 336/24)
+        unnormalize (bool): unnormalize the image before plotting
+    """
+    img = image_tensor.clone()
+
+    if unnormalize:
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        img = img * std + mean
+
+    img_np = img.cpu().numpy().transpose(1, 2, 0)
+    img_np = np.clip(img_np, 0, 1)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_np)
+
+    # Unpack x and y from patch indices
+    xs, ys = zip(*patch_scanpath)
+    xs = np.array(xs)
+    ys = np.array(ys)
+
+    # Convert to pixel coordinates (center of patch)
+    center_xs = xs * patch_size + patch_size // 2
+    center_ys = ys * patch_size + patch_size // 2
+
+    ax.plot(center_xs, center_ys, marker='o', color='red', linewidth=1.5, alpha=0.6)
+    for i, (x, y) in enumerate(zip(center_xs, center_ys)):
+        ax.text(x, y, str(i+1), color='yellow', fontsize=8, ha='center', va='center')
+
+    ax.axis('off')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+
+def plot_tensor_with_scanpath(image_tensor, scanpath, save_path, unnormalize=True):
+    """
+    image_tensor: torch.Tensor of shape [3, H, W]
+    scanpath: dict with 'X' and 'Y' (in pixel coordinates)
+    save_path: output file path (e.g. "out/scanpath_0.png")
+    unnormalize: whether to unnormalize the image for plotting
+    """
+    img = image_tensor.clone()
+
+    if unnormalize:
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        img = img * std + mean
+
+    img_np = img.cpu().numpy().transpose(1, 2, 0)  # [H, W, C]
+    img_np = np.clip(img_np, 0, 1)
+
+    fig, ax = plt.subplots()
+    ax.imshow(img_np)
+    
+    xs, ys = scanpath[0]['X'], scanpath[0]['Y']
+    ax.plot(xs, ys, marker='o', color='red', linewidth=1.5, alpha=0.6)
+
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        ax.text(x, y, str(i+1), color='yellow', fontsize=8, ha='center', va='center')
+
+    ax.axis('off')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+    return
 
 def load_image(image_file):
     if image_file.startswith('http://') or image_file.startswith('https://'):
@@ -30,7 +106,6 @@ def main(args):
 
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, args.load_8bit, args.load_4bit, device=args.device)
-
     if "llama-2" in model_name.lower():
         conv_mode = "llava_llama_2"
     elif "mistral" in model_name.lower():
@@ -49,6 +124,9 @@ def main(args):
     else:
         args.conv_mode = conv_mode
 
+    if args.scanpath is not None :
+        scanpaths = [[np.load(os.path.expanduser(args.scanpath), allow_pickle=True).item()]]
+
     conv = conv_templates[args.conv_mode].copy()
     if "mpt" in model_name.lower():
         roles = ('user', 'assistant')
@@ -57,13 +135,29 @@ def main(args):
 
     image = load_image(args.image_file)
     image_size = image.size
+
+
     # Similar operation in model_worker.py
-    image_tensor = process_images([image], image_processor, model.config)
+    image_tensor, new_scanpaths = process_images([image], image_processor, model.config, scanpaths)
+
+    # # NOTE:Sanity check to see if the resized scanpaths match
+    processed_scanpaths = process_scanpaths(new_scanpaths, mode=1)
+    
+    for i in range(len(image_tensor)): 
+        save_path = f"scanpath_plots/scanpath_{i}.png"
+        # plot_tensor_with_scanpath(image_tensor[i], processed_scanpaths[i], save_path)
+        plot_tensor_with_scanpath(image_tensor[i], new_scanpaths[i], save_path)
+        save_path = f"scanpath_plots/scanpath_{i}_1.png"
+        plot_tensor_with_patch_indices(image_tensor[i], processed_scanpaths[i], save_path)
+    print("done saving!")
+
+    # print(processed_scanpaths)
+
     if type(image_tensor) is list:
         image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
     else:
         image_tensor = image_tensor.to(model.device, dtype=torch.float16)
-
+    
     while True:
         try:
             inp = input(f"{roles[0]}: ")
@@ -97,15 +191,24 @@ def main(args):
                 input_ids,
                 images=image_tensor,
                 image_sizes=[image_size],
+                scanpaths=processed_scanpaths,
+                output_attentions=True, # NOTE: Added to visualize attention
+                return_dict_in_generate=True,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 max_new_tokens=args.max_new_tokens,
                 streamer=streamer,
-                use_cache=True)
+                use_cache=True,
+                mask_type={'type' : 'salient-head', 'margin' : 0})
+            
+            attn_weights_and_image_infos = {}
+            attn_weights_and_image_infos['attentions'] = output_ids.attentions
+            attn_weights_and_image_infos['image_infos'] = output_ids.image_infos
+            save_path = os.path.expanduser('~/NSERC/LLaVA/weight_data/image_2_without_gaussian.pt')
+            # torch.save(attn_weights_and_image_infos, save_path)
 
-        outputs = tokenizer.decode(output_ids[0]).strip()
+        outputs = tokenizer.decode(output_ids.sequences[0]).strip()
         conv.messages[-1][-1] = outputs
-
         if args.debug:
             print("\n", {"prompt": prompt, "outputs": outputs}, "\n")
 
@@ -122,5 +225,6 @@ if __name__ == "__main__":
     parser.add_argument("--load-8bit", action="store_true")
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--scanpath", type=str, default="~/NSERC/scanpath.npy")
     args = parser.parse_args()
     main(args)
