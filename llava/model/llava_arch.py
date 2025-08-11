@@ -264,6 +264,7 @@ class LlavaMetaForCausalLM(ABC):
             cur_labels_noim = []
 
             image_start_index = image_token_indices[1]
+
             num_patches = image_features[cur_image_idx].shape[0]
             
             image_info = {

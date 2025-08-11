@@ -198,7 +198,8 @@ def main(args):
                 temperature=args.temperature,
                 max_new_tokens=args.max_new_tokens,
                 streamer=streamer,
-                use_cache=True)
+                use_cache=True,
+                mask_type={'type' : 'salient-head', 'margin' : 0})
             
             attn_weights_and_image_infos = {}
             attn_weights_and_image_infos['attentions'] = output_ids.attentions

@@ -135,24 +135,33 @@ def main(args) :
         image_ids.append(long_id)
         id_to_path[long_id] = p
 
+    if len(image_ids) == 0 :
+        print("No images")
+        return
+
     # PROMPTS = [
     #     "Describe the image concisely in one sentence, up to 20 words only.",
     #     "Render a clear and concise summary of the photo in one sentence, up to 20 words only.",
     #     "Share a concise interpretation of the image provided in one sentence, up to 20 words only.",
     #     "Give a brief description of the image in one sentence, up to 20 words only.",
     # ]
+
     PROMPTS = [
-        "Describe the bird concisely in one sentence, up to 20 words only.",
-        "Render a clear and concise summary of the bird in the photo in one sentence, up to 20 words only.",
-        "Share a concise interpretation of the bird in the provided image in one sentence, up to 20 words only.",
-        "Give a brief description of bird in the image in one sentence, up to 20 words only.",
+        "Please describe this image in detail"
     ]
+
+    # PROMPTS = [
+    #     "Describe the bird concisely in one sentence, up to 20 words only.",
+    #     "Render a clear and concise summary of the bird in the photo in one sentence, up to 20 words only.",
+    #     "Share a concise interpretation of the bird in the provided image in one sentence, up to 20 words only.",
+    #     "Give a brief description of bird in the image in one sentence, up to 20 words only.",
+    # ]
 
     output_captions: dict[str , list[str]] = defaultdict(list)
 
     for cap_k, prompt_tpl in enumerate(PROMPTS):
         total_batches = (len(image_ids) + BATCH_SIZE - 1) // BATCH_SIZE
-
+        
         for batch_start in tqdm(
             range(0, len(image_ids), BATCH_SIZE),
             total=total_batches,
@@ -195,7 +204,7 @@ def main(args) :
                 image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
             else:
                 image_tensor = image_tensor.to(model.device, dtype=torch.float16)
-
+            
             input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in prompts], dim=0).to(model.device)
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -204,7 +213,7 @@ def main(args) :
                         image_sizes=image_sizes,
                         scanpaths=processed_scanpaths,
                         mask_type=mask_type,
-                        output_attentions=True,
+                        output_attentions=False,
                         return_dict_in_generate=True,
                         do_sample=True if args.temperature > 0 else False,
                         temperature=args.temperature,
@@ -217,18 +226,19 @@ def main(args) :
                 output_captions[image_id].append(outputs[j])
 
             save_helper(answers_path=answers_path, output_captions=output_captions)
-
-            if cap_k == 0 and batch_start < 8 :
-                weights = output_ids['attentions']
-                image_infos = output_ids['image_infos']
-                data = {
-                    'attn_weights' : weights,
-                    'image_infos' : image_infos,
-                    'all_image_ids' : batch_img_ids
-                }
-                torch.save(data, os.path.join(weights_dir, f"{batch_start // BATCH_SIZE}_weights.pt"))
-                print(f"Saved weights to {weights_dir} ✅", flush=True)
-                print(f"Sample outputs : {outputs}")
+            # if cap_k == 0 and batch_start < 8 :
+            #     weights = output_ids['attentions']
+            #     image_infos = output_ids['image_infos']
+            #     data = {
+            #         'attn_weights' : weights,
+            #         'image_infos' : image_infos,
+            #         'all_image_ids' : batch_img_ids,
+            #         'scanpaths' : processed_scanpaths
+            #     }
+            #     torch.save(data, os.path.join(weights_dir, f"{batch_start // BATCH_SIZE}_weights.pt"))
+            #     print(f"Saved weights to {weights_dir} ✅", flush=True)
+            #     print(f"Sample outputs : {outputs}")
+                
 
     save_helper(answers_path=answers_path, output_captions=output_captions)
 

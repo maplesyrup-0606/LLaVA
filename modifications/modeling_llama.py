@@ -320,6 +320,7 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
         self._init_rope()
 
+
     def _init_rope(self):
         if self.config.rope_scaling is None:
             self.rotary_emb = LlamaRotaryEmbedding(
@@ -351,38 +352,50 @@ class LlamaAttention(nn.Module):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
     
     def apply_gaze_mask(self, attn_weights, image_infos, scanpaths, grid_size=24, margin=0) :
-        custom_mask = torch.zeros_like(attn_weights)
-        # print(f"Margin is {margin}")
-        if not any(scanpaths) :
-            return custom_mask
         
+        if not any(len(sp) > 0 for sp in scanpaths) :
+            return attn_weights
+        
+        custom_mask = attn_weights.clone()
+        B, H, Q, K = custom_mask.shape
+        eps = 1e-6
+
         for b, image_info in enumerate(image_infos) :
             if len(scanpaths[b]) == 0 : 
-                print("No scanpaths..",flush=True)
                 continue
 
             start_idx = image_info['start_index']
-            end_idx = start_idx + image_info['num_patches']
-            custom_mask[b, :, :, start_idx : end_idx] = float('-inf')
+            L = image_info['num_patches']
+            end_idx = start_idx + L
+            
             
             offsets = torch.tensor([
                 (dx, dy)
                 for dx in [-margin, 0, margin]
                 for dy in [-margin, 0, margin]
-            ], device=attn_weights.device)
+            ], device=attn_weights.device, dtype=torch.long)
 
-
-            gaze = torch.tensor(scanpaths[b], device=attn_weights.device)
+            gaze = torch.tensor(scanpaths[b], device=attn_weights.device, dtype=torch.long)
+            if gaze.numel() == 0:
+                continue
 
             neighbors = (gaze[:, None, :] + offsets[None, :, :]).reshape(-1, 2)
-
             neighbors[:, 0].clamp_(0, grid_size - 1)
             neighbors[:, 1].clamp_(0, grid_size - 1)
-
             unique_neighbors = torch.unique(neighbors, dim=0)
 
             target_idx = start_idx + unique_neighbors[:, 0] + unique_neighbors[:, 1] * grid_size
-            custom_mask[b, :, :, target_idx] = 0.0
+            target_idx = target_idx.clamp(start_idx, end_idx - 1).unique()
+
+            keep_k = torch.ones(K, dtype=torch.bool, device=attn_weights.device)
+            keep_k[start_idx:end_idx] = False
+            keep_k[target_idx] = True
+            keep_k = keep_k.to(custom_mask.dtype)
+
+            custom_mask[b] = custom_mask[b] * keep_k[None, None, :]
+
+            row_sum = custom_mask[b].sum(dim=-1, keepdim=True).clamp_min(eps)
+            custom_mask[b] = custom_mask[b] / row_sum
 
         return custom_mask
 
@@ -410,7 +423,7 @@ class LlamaAttention(nn.Module):
 
         attn_weights = attn_weights / attn_weights.sum(dim=-1, keepdim=True)
         return attn_weights
-    
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -422,6 +435,7 @@ class LlamaAttention(nn.Module):
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
         mask_type: Optional[Dict[str, Any]] = None,
+        gaussian_masks: Optional[List] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         if "padding_mask" in kwargs:
@@ -457,6 +471,7 @@ class LlamaAttention(nn.Module):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
+
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -491,34 +506,126 @@ class LlamaAttention(nn.Module):
                 )
             attn_weights = attn_weights + attention_mask
             
-        #######################################################################################################
-        # NOTE: Patch dropping for non-gaze patches
-        if mask_type["type"] == "non-gaussian" :
-            margin = mask_type["margin"]
-            if "target-layer" in mask_type :
-                if self.layer_idx == mask_type["target-layer"] :
-                    custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
-                    attn_weights += custom_mask
-            else :
-                custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
-                attn_weights += custom_mask
-        #######################################################################################################
-
+        
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        
+        ######################### Code for salient head detection #############################################
+        # Post soft-max evaluation
+        TARGET_LAYERS = range(19, 27)
+        # if mask_type["target-layer"] == -1 :
+        #     tau = 0.2961
+        #     k = 32
+        # else :
+        tau = 0.5232
+        k = 8
+        sel = None
+        # attn_weights = bsz x heads x q_len x head_dim
+        if (self.layer_idx in TARGET_LAYERS) and (gaussian_masks is not None) and (mask_type["type"] == "salient-head") :
+            img_start, L = 35, 576
+            img_slice = slice(img_start, img_start + L)
+
+            mask_stack = torch.stack([
+                m if m is not None else torch.zeros(L, device=attn_weights.device, dtype=attn_weights.dtype)
+                for m in gaussian_masks
+            ])
+
+            vis = attn_weights[:, :, -1, img_slice] # bsz x num_heads x L
+
+            mask_exp = mask_stack.unsqueeze(1).expand(-1, self.num_heads, -1) # bsz x num_heads x L
+
+            num = (vis * mask_exp).sum(dim=2) # bsz x num_heads
+            den = vis.sum(dim=2).clamp_min(1e-9) # bsz x num_heads
+            sim = num / den # bsz x num_heads
+
+            # relative scaling per layer
+            layer_max = sim.max(dim=1, keepdim=True).values # bsz x 1 
+            sim = sim / (layer_max + 1e-9) # bsz x num_heads
+
+            above = sim > tau # bsz x num_heads
+
+            if not above.any() :
+                pass
+            
+            scores = sim.masked_fill(~above, float("-inf")) 
+            topk_idx = scores.topk(k, dim=1).indices # bsz x k
+            sel = torch.zeros_like(above, dtype=torch.bool) # bsz x num_heads
+            sel.scatter_(1, topk_idx, True)
+            sel &= above
+
+            sel_mask = sel.unsqueeze(-1) # bsz x num_heads x 1 
+            vis = torch.where(sel_mask, vis * mask_exp, vis)
+            attn_weights[:, :, -1, img_slice] = vis
+
+            eps = 1e-6
+            last = attn_weights[:, :, -1, :].float()
+            if sel.any():
+                rows = last[sel]
+                rows_sum = rows.sum(dim=-1, keepdim=True).clamp_min(eps)
+                last[sel] = rows / rows_sum
+
+            attn_weights[:, :, -1, :] = last.to(attn_weights.dtype)
+            
+        #######################################################################################################
 
         #######################################################################################################
-        # NOTE: This is the gaussian weighting of patches with gaze-patterns
+        # # NOTE: This is the gaussian weighting of patches with gaze-patterns
         if mask_type["type"] == "gaussian" :
+            
             if "target-layer" in mask_type :
                 if self.layer_idx == mask_type["target-layer"] :
                     attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
             else :
                 attn_weights = self.apply_gaussian_to_weights(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths)
         #########################################################################################################################
+
+        #######################################################################################################
+        # NOTE: Patch dropping for non-gaze patches
+        if mask_type["type"] == "non-gaussian" :
+            margin = mask_type["margin"]
+            
+            if "target-layer" in mask_type :
+                if self.layer_idx == mask_type["target-layer"] :
+                    custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
+                    attn_weights = custom_mask
+            else :
+                custom_mask = self.apply_gaze_mask(attn_weights=attn_weights, image_infos=image_infos, scanpaths=scanpaths, margin=margin)
+                attn_weights = custom_mask
+        #######################################################################################################
         
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
+
+        # if sel is not None and mask_type['type']=='salient-head':
+        #     # set to mean of other heads those heads that are treated-salient.
+        #     B, H, T, D = attn_output.shape
+
+        #     non_sel = ~sel
+        #     non_sel_mask = non_sel.unsqueeze(-1).unsqueeze(-1) # bsz x num_heads x 1 x 1
+        #     sel_mask = sel.unsqueeze(-1).unsqueeze(-1) # bsz x num_heads x 1 x 1
+            
+        #     ## 1 : paste salient mean to non-salient ##
+        #     # masked_output = attn_output * sel_mask 
+        #     # num_sel = sel.sum(dim=1, keepdim=True).clamp_min(1)
+            
+        #     # mean_output = masked_output.sum(dim=1, keepdim=True) / num_sel.view(B, 1, 1, 1)
+            
+        #     # mean_expanded = mean_output.expand(-1, H, -1, -1)
+
+        #     # attn_output = torch.where(non_sel_mask, mean_expanded, attn_output)
+            
+        #     ## 2 : paste non-salient mean to salient ##
+        #     # masked_output = attn_output * non_sel_mask
+        #     # num_non_sel = non_sel.sum(dim=1, keepdim=True).clamp_min(1) # bsz x 1
+
+        #     # mean_output = masked_output.sum(dim=1, keepdim=True) / num_non_sel.view(B, 1, 1, 1) # bsz x 1 x 
+
+        #     # mean_expanded = mean_output.expand(-1, H, -1, -1) # B x H x T x D
+
+        #     # attn_output = torch.where(sel_mask, mean_expanded, attn_output)
+
+        #     ## 3 : zero-out salient heads ##
+        #     attn_output = attn_output.masked_fill(sel_mask, 0)
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
@@ -859,6 +966,7 @@ class LlamaDecoderLayer(nn.Module):
         image_infos: Optional[List[dict]] = None,
         scanpaths: Optional[List] = None,
         mask_type: Optional[Dict[str, Any]] = None,
+        gaussian_masks:Optional[List] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -894,6 +1002,7 @@ class LlamaDecoderLayer(nn.Module):
             image_infos=image_infos,
             scanpaths=scanpaths,
             mask_type=mask_type,
+            gaussian_masks=gaussian_masks,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -1062,6 +1171,34 @@ class LlamaModel(LlamaPreTrainedModel):
 
     def set_input_embeddings(self, value):
         self.embed_tokens = value
+    
+    def build_gaussian_connected_decay_mask(self, scanpoints, grid_size=24, sigma=1.5, margin=1, device='cuda'):
+
+        mask = torch.zeros((1, 1, grid_size, grid_size), device=device)
+
+        for x, y in scanpoints :
+            x_start = max(0, x - margin)
+            x_end = min(grid_size - 1, x + margin) 
+            y_start = max(0, y - margin) 
+            y_end = min(grid_size - 1, y + margin)
+            mask[0, 0, y_start : y_end + 1, x_start : x_end + 1] = 1.0
+    
+        final_mask = torch.zeros_like(mask)
+        visited = torch.zeros_like(mask, dtype=torch.bool) 
+
+        max_steps = math.ceil(3 * sigma)
+
+        kernel = torch.ones((1, 1, 3, 3), device=device)
+
+        for d in range(max_steps + 1) :
+            decay_weight = math.exp(- (d ** 2) / (2 * sigma ** 2))
+            new_layer = (mask > 0) & (~visited)
+            final_mask[new_layer] = decay_weight
+            visited = visited | new_layer
+
+            mask = (F.conv2d(mask, kernel, padding = 1) > 0).float()
+        
+        return final_mask.view(grid_size * grid_size).squeeze(0).squeeze(0)
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(
@@ -1147,6 +1284,21 @@ class LlamaModel(LlamaPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
+        self.gaussian_masks = []
+
+        for b, image_info in enumerate(image_infos) :
+            if len(scanpaths[b]) == 0 :
+                self.gaussian_masks.append(None)
+                continue 
+            
+            self.gaussian_masks.append(
+                self.build_gaussian_connected_decay_mask(scanpoints=scanpaths[b], 
+                                                         grid_size=24, 
+                                                         sigma=1.5, 
+                                                         margin=1, 
+                                                         device=attention_mask.device).view(-1)
+                                                         )
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -1172,6 +1324,7 @@ class LlamaModel(LlamaPreTrainedModel):
                     image_infos=image_infos,
                     scanpaths=scanpaths,
                     mask_type=mask_type,
+                    gaussian_masks=self.gaussian_masks
                 )
 
             hidden_states = layer_outputs[0]
