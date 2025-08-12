@@ -513,10 +513,7 @@ class LlamaAttention(nn.Module):
         ######################### Code for salient head detection #############################################
         # Post soft-max evaluation
         TARGET_LAYERS = range(19, 27)
-        # if mask_type["target-layer"] == -1 :
-        #     tau = 0.2961
-        #     k = 32
-        # else :
+        
         tau = 0.5232
         k = 8
         sel = None
