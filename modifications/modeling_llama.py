@@ -515,7 +515,9 @@ class LlamaAttention(nn.Module):
         TARGET_LAYERS = range(19, 27)
         
         tau = 0.5232
+        # tau = 0.2961
         k = 8
+        # k = 32
         sel = None
         # attn_weights = bsz x heads x q_len x head_dim
         if (self.layer_idx in TARGET_LAYERS) and (gaussian_masks is not None) and (mask_type["type"] == "salient-head") :

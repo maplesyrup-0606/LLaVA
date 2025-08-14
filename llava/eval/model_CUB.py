@@ -147,7 +147,7 @@ def main(args) :
     # ]
 
     PROMPTS = [
-        "Please describe this image in detail"
+        "Please describe this image in detail, up to 65 words only."
     ]
 
     # PROMPTS = [
