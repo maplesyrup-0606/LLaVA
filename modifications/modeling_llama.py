@@ -514,10 +514,10 @@ class LlamaAttention(nn.Module):
         # Post soft-max evaluation
         TARGET_LAYERS = range(19, 27)
         
-        tau = 0.5232
-        # tau = 0.2961
-        k = 8
-        # k = 32
+        # tau = 0.5232
+        tau = 0.2961
+        # k = 8
+        k = 32
         sel = None
         # attn_weights = bsz x heads x q_len x head_dim
         if (self.layer_idx in TARGET_LAYERS) and (gaussian_masks is not None) and (mask_type["type"] == "salient-head") :
@@ -528,8 +528,10 @@ class LlamaAttention(nn.Module):
                 m if m is not None else torch.zeros(L, device=attn_weights.device, dtype=attn_weights.dtype)
                 for m in gaussian_masks
             ])
-
+            
             vis = attn_weights[:, :, -1, img_slice] # bsz x num_heads x L
+            # track visual attention sum
+            vis_old_sum = vis.sum(dim=-1, keepdim=True)
 
             mask_exp = mask_stack.unsqueeze(1).expand(-1, self.num_heads, -1) # bsz x num_heads x L
 
@@ -537,9 +539,9 @@ class LlamaAttention(nn.Module):
             den = vis.sum(dim=2).clamp_min(1e-9) # bsz x num_heads
             sim = num / den # bsz x num_heads
 
-            # relative scaling per layer
-            layer_max = sim.max(dim=1, keepdim=True).values # bsz x 1 
-            sim = sim / (layer_max + 1e-9) # bsz x num_heads
+            # # relative scaling per layer
+            # layer_max = sim.max(dim=1, keepdim=True).values # bsz x 1 
+            # sim = sim / (layer_max + 1e-9) # bsz x num_heads
 
             above = sim > tau # bsz x num_heads
 
@@ -556,15 +558,23 @@ class LlamaAttention(nn.Module):
             vis = torch.where(sel_mask, vis * mask_exp, vis)
             attn_weights[:, :, -1, img_slice] = vis
 
-            eps = 1e-6
-            last = attn_weights[:, :, -1, :].float()
-            if sel.any():
-                rows = last[sel]
-                rows_sum = rows.sum(dim=-1, keepdim=True).clamp_min(eps)
-                last[sel] = rows / rows_sum
+            eps = 1e-9
 
-            attn_weights[:, :, -1, :] = last.to(attn_weights.dtype)
+            # # Normalize by whole row
+            # last = attn_weights[:, :, -1, :].float()
+            # if sel.any():
+            #     rows = last[sel]
+            #     rows_sum = rows.sum(dim=-1, keepdim=True).clamp_min(eps)
+            #     last[sel] = rows / rows_sum
+
+            # attn_weights[:, :, -1, :] = last.to(attn_weights.dtype)
             
+            # Normalize only by vision portion
+            if sel.any() :
+                vis_new_sum = vis.sum(dim=-1, keepdim=True)
+                scale = (vis_old_sum.clamp_min(eps) / vis_new_sum.clamp_min(eps))
+                attn_weights[:, :, -1, img_slice] = attn_weights[:, :, -1, img_slice] * scale
+
         #######################################################################################################
 
         #######################################################################################################

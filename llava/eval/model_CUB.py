@@ -139,6 +139,7 @@ def main(args) :
         print("No images")
         return
 
+    # Original Prompts
     # PROMPTS = [
     #     "Describe the image concisely in one sentence, up to 20 words only.",
     #     "Render a clear and concise summary of the photo in one sentence, up to 20 words only.",
@@ -146,10 +147,17 @@ def main(args) :
     #     "Give a brief description of the image in one sentence, up to 20 words only.",
     # ]
 
+    # New Prompt to avoid collapsing for old methods
+    # PROMPTS = [
+    #     "Please describe this image in detail, up to 65 words only."
+    # ]
+
+    # New Prompt
     PROMPTS = [
-        "Please describe this image in detail, up to 65 words only."
+        "Please describe this image in detail."
     ]
 
+    # Prompt forced for CUB_200_2011
     # PROMPTS = [
     #     "Describe the bird concisely in one sentence, up to 20 words only.",
     #     "Render a clear and concise summary of the bird in the photo in one sentence, up to 20 words only.",
